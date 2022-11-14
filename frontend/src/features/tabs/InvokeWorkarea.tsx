@@ -1,7 +1,20 @@
+import { Tooltip } from '@chakra-ui/react';
+import { createSelector } from '@reduxjs/toolkit';
 import { ReactNode } from 'react';
-import { RootState, useAppSelector } from '../../app/store';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { VscSplitHorizontal } from 'react-icons/vsc';
+import { RootState, useAppDispatch, useAppSelector } from '../../app/store';
 import ImageGallery from '../gallery/ImageGallery';
-import ShowHideGalleryButton from '../gallery/ShowHideGalleryButton';
+import { activeTabNameSelector } from '../options/optionsSelectors';
+import { OptionsState, setShowDualDisplay } from '../options/optionsSlice';
+
+const workareaSelector = createSelector(
+  [(state: RootState) => state.options, activeTabNameSelector],
+  (options: OptionsState, activeTabName) => {
+    const { showDualDisplay, shouldPinOptionsPanel } = options;
+    return { showDualDisplay, shouldPinOptionsPanel, activeTabName };
+  }
+);
 
 type InvokeWorkareaProps = {
   optionsPanel: ReactNode;
@@ -10,10 +23,26 @@ type InvokeWorkareaProps = {
 };
 
 const InvokeWorkarea = (props: InvokeWorkareaProps) => {
+  const dispatch = useAppDispatch();
   const { optionsPanel, children, styleClass } = props;
+  const { showDualDisplay, activeTabName } = useAppSelector(workareaSelector);
 
-  const { shouldShowGallery, shouldHoldGalleryOpen, shouldPinGallery } =
-    useAppSelector((state: RootState) => state.gallery);
+  const handleDualDisplay = () => {
+    dispatch(setShowDualDisplay(!showDualDisplay));
+  };
+
+  // Hotkeys
+  // Toggle split view
+  useHotkeys(
+    'shift+j',
+    () => {
+      handleDualDisplay();
+    },
+    {
+      enabled: activeTabName === 'inpainting',
+    },
+    [showDualDisplay]
+  );
 
   return (
     <div
@@ -22,13 +51,23 @@ const InvokeWorkarea = (props: InvokeWorkareaProps) => {
       }
     >
       <div className="workarea-main">
-        <div className="workarea-options-panel">{optionsPanel}</div>
-        {children}
+        {optionsPanel}
+        <div className="workarea-children-wrapper">
+          {children}
+          {activeTabName === 'inpainting' && (
+            <Tooltip label="Toggle Split View">
+              <div
+                className="workarea-split-button"
+                data-selected={showDualDisplay}
+                onClick={handleDualDisplay}
+              >
+                <VscSplitHorizontal />
+              </div>
+            </Tooltip>
+          )}
+        </div>
         <ImageGallery />
       </div>
-      {!(shouldShowGallery || (shouldHoldGalleryOpen && !shouldPinGallery)) && (
-        <ShowHideGalleryButton />
-      )}
     </div>
   );
 };

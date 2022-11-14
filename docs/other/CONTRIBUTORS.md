@@ -9,11 +9,11 @@ experience in this fork.
 
 We thank them for all of their time and hard work.
 
-## **Original Author:**
+## **Original Author**
 
 - [Lincoln D. Stein](mailto:lincoln.stein@gmail.com)
 
-## **Contributions by:**
+## **Contributions by**
 
 - [Sean McLellan](https://github.com/Oceanswave)
 - [Kevin Gibbons](https://github.com/bakkot)
@@ -59,8 +59,10 @@ We thank them for all of their time and hard work.
 - [Dominic Letz](https://github.com/dominicletz)
 - [Dmitry T.](https://github.com/ArDiouscuros)
 - [Kent Keirsey](https://github.com/hipsterusername)
+- [psychedelicious](https://github.com/psychedelicious)
+- [damian0815](https://github.com/damian0815)
 
-## **Original CompVis Authors:**
+## **Original CompVis Authors**
 
 - [Robin Rombach](https://github.com/rromb)
 - [Patrick von Platen](https://github.com/patrickvonplaten)

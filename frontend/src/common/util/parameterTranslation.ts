@@ -62,11 +62,13 @@ export const frontendToBackendParameters = (
     shouldRandomizeSeed,
   } = optionsState;
 
-  const { shouldDisplayInProgress } = systemState;
+  const { shouldDisplayInProgressType, saveIntermediatesInterval } =
+    systemState;
 
   const generationParameters: { [k: string]: any } = {
     prompt,
-    iterations,
+    iterations:
+      shouldRandomizeSeed || shouldGenerateVariations ? iterations : 1,
     steps,
     cfg_scale: cfgScale,
     threshold,
@@ -75,7 +77,9 @@ export const frontendToBackendParameters = (
     width,
     sampler_name: sampler,
     seed,
-    progress_images: shouldDisplayInProgress,
+    progress_images: shouldDisplayInProgressType === 'full-res',
+    progress_latents: shouldDisplayInProgressType === 'latents',
+    save_intermediates: saveIntermediatesInterval,
   };
 
   generationParameters.seed = shouldRandomizeSeed
@@ -100,47 +104,41 @@ export const frontendToBackendParameters = (
   if (generationMode === 'inpainting' && maskImageElement) {
     const {
       lines,
-      boundingBoxCoordinate: { x, y },
-      boundingBoxDimensions: { width, height },
-      shouldShowBoundingBox,
+      boundingBoxCoordinate,
+      boundingBoxDimensions,
       inpaintReplace,
       shouldUseInpaintReplace,
     } = inpaintingState;
 
-    let bx = x,
-      by = y,
-      bwidth = width,
-      bheight = height;
-
-    if (!shouldShowBoundingBox) {
-      bx = 0;
-      by = 0;
-      bwidth = maskImageElement.width;
-      bheight = maskImageElement.height;
-    }
-
     const boundingBox = {
-      x: bx,
-      y: by,
-      width: bwidth,
-      height: bheight,
+      ...boundingBoxCoordinate,
+      ...boundingBoxDimensions,
     };
-
-    if (shouldUseInpaintReplace) {
-      generationParameters.inpaint_replace = inpaintReplace;
-    }
 
     generationParameters.init_img = imageToProcessUrl;
     generationParameters.strength = img2imgStrength;
     generationParameters.fit = false;
 
-    const maskDataURL = generateMask(maskImageElement, lines, boundingBox);
+    const { maskDataURL, isMaskEmpty } = generateMask(
+      maskImageElement,
+      lines,
+      boundingBox
+    );
+
+    generationParameters.is_mask_empty = isMaskEmpty;
 
     generationParameters.init_mask = maskDataURL.split(
       'data:image/png;base64,'
     )[1];
 
+    if (shouldUseInpaintReplace) {
+      generationParameters.inpaint_replace = inpaintReplace;
+    }
+
     generationParameters.bounding_box = boundingBox;
+
+    // TODO: The server metadata generation needs to be changed to fix this.
+    generationParameters.progress_images = false;
   }
 
   if (shouldGenerateVariations) {

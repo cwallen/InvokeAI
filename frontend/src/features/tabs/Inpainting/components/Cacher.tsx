@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { RootState, useAppSelector } from '../../../../app/store';
 import { maskLayerRef } from '../InpaintingCanvas';
 
@@ -33,6 +33,9 @@ const Cacher = () => {
     futureLines,
     needsCache,
     isDrawing,
+    isTransformingBoundingBox,
+    isMovingBoundingBox,
+    shouldShowBoundingBox,
   } = useAppSelector((state: RootState) => state.inpainting);
 
   useLayoutEffect(() => {
@@ -58,12 +61,15 @@ const Cacher = () => {
     imageToInpaint,
     shouldShowBrush,
     shouldShowBoundingBoxFill,
+    shouldShowBoundingBox,
     shouldLockBoundingBox,
     stageScale,
     pastLines,
     futureLines,
     needsCache,
     isDrawing,
+    isTransformingBoundingBox,
+    isMovingBoundingBox,
   ]);
 
   /**

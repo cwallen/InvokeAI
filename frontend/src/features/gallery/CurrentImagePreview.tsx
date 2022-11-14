@@ -1,9 +1,13 @@
-import { IconButton, Image } from '@chakra-ui/react';
+import { IconButton, Image, Spinner } from '@chakra-ui/react';
 import { useState } from 'react';
 import { FaAngleLeft, FaAngleRight } from 'react-icons/fa';
 import { RootState, useAppDispatch, useAppSelector } from '../../app/store';
-import { GalleryState, selectNextImage, selectPrevImage } from './gallerySlice';
-import * as InvokeAI from '../../app/invokeai';
+import {
+  GalleryCategory,
+  GalleryState,
+  selectNextImage,
+  selectPrevImage,
+} from './gallerySlice';
 import { createSelector } from '@reduxjs/toolkit';
 import _ from 'lodash';
 import { OptionsState } from '../options/optionsSlice';
@@ -12,20 +16,28 @@ import ImageMetadataViewer from './ImageMetaDataViewer/ImageMetadataViewer';
 export const imagesSelector = createSelector(
   [(state: RootState) => state.gallery, (state: RootState) => state.options],
   (gallery: GalleryState, options: OptionsState) => {
-    const { currentCategory } = gallery;
+    const { currentCategory, currentImage, intermediateImage } = gallery;
     const { shouldShowImageDetails } = options;
 
-    const tempImages = gallery.categories[currentCategory].images;
+    const tempImages =
+      gallery.categories[
+        currentImage ? (currentImage.category as GalleryCategory) : 'result'
+      ].images;
     const currentImageIndex = tempImages.findIndex(
       (i) => i.uuid === gallery?.currentImage?.uuid
     );
     const imagesLength = tempImages.length;
+
     return {
+      imageToDisplay: intermediateImage ? intermediateImage : currentImage,
       currentCategory,
       isOnFirstImage: currentImageIndex === 0,
       isOnLastImage:
         !isNaN(currentImageIndex) && currentImageIndex === imagesLength - 1,
       shouldShowImageDetails,
+      shouldShowPrevImageButton: currentImageIndex === 0,
+      shouldShowNextImageButton:
+        !isNaN(currentImageIndex) && currentImageIndex === imagesLength - 1,
     };
   },
   {
@@ -35,19 +47,14 @@ export const imagesSelector = createSelector(
   }
 );
 
-interface CurrentImagePreviewProps {
-  imageToDisplay: InvokeAI.Image;
-}
-
-export default function CurrentImagePreview(props: CurrentImagePreviewProps) {
-  const { imageToDisplay } = props;
+export default function CurrentImagePreview() {
   const dispatch = useAppDispatch();
 
   const {
     isOnFirstImage,
     isOnLastImage,
-    currentCategory,
     shouldShowImageDetails,
+    imageToDisplay,
   } = useAppSelector(imagesSelector);
 
   const [shouldShowNextPrevButtons, setShouldShowNextPrevButtons] =
@@ -62,20 +69,22 @@ export default function CurrentImagePreview(props: CurrentImagePreviewProps) {
   };
 
   const handleClickPrevButton = () => {
-    dispatch(selectPrevImage(currentCategory));
+    dispatch(selectPrevImage());
   };
 
   const handleClickNextButton = () => {
-    dispatch(selectNextImage(currentCategory));
+    dispatch(selectNextImage());
   };
 
   return (
     <div className={'current-image-preview'}>
-      <Image
-        src={imageToDisplay.url}
-        width={imageToDisplay.width}
-        height={imageToDisplay.height}
-      />
+      {imageToDisplay && (
+        <Image
+          src={imageToDisplay.url}
+          width={imageToDisplay.width}
+          height={imageToDisplay.height}
+        />
+      )}
       {!shouldShowImageDetails && (
         <div className="current-image-next-prev-buttons">
           <div
@@ -108,7 +117,7 @@ export default function CurrentImagePreview(props: CurrentImagePreviewProps) {
           </div>
         </div>
       )}
-      {shouldShowImageDetails && (
+      {shouldShowImageDetails && imageToDisplay && (
         <ImageMetadataViewer
           image={imageToDisplay}
           styleClass="current-image-metadata"

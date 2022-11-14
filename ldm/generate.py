@@ -14,6 +14,7 @@ import sys
 import traceback
 import transformers
 import io
+import gc
 import hashlib
 import cv2
 import skimage
@@ -57,7 +58,7 @@ torch.bernoulli = fix_func(torch.bernoulli)
 torch.multinomial = fix_func(torch.multinomial)
 
 # this is fallback model in case no default is defined
-FALLBACK_MODEL_NAME='stable-diffusion-1.4'
+FALLBACK_MODEL_NAME='stable-diffusion-1.5'
 
 """Simplified text to image API for stable diffusion/latent diffusion
 
@@ -121,7 +122,7 @@ gr = Generate(
 
           # these are deprecated - use conf and model instead
           weights     = path to model weights ('models/ldm/stable-diffusion-v1/model.ckpt')
-          config      = path to model configuraiton ('configs/stable-diffusion/v1-inference.yaml')
+          config      = path to model configuration ('configs/stable-diffusion/v1-inference.yaml')
           )
 
 """
@@ -141,11 +142,13 @@ class Generate:
             ddim_eta = 0.0,  # deterministic
             full_precision = False,
             precision = 'auto',
+            outdir = 'outputs/img-samples',
             gfpgan=None,
             codeformer=None,
             esrgan=None,
             free_gpu_mem=False,
             safety_checker:bool=False,
+            max_loaded_models:int=2,
             # these are deprecated; if present they override values in the conf file
             weights = None,
             config = None,
@@ -173,10 +176,12 @@ class Generate:
         self.generators     = {}
         self.base_generator = None
         self.seed           = None
+        self.outdir = outdir
         self.gfpgan = gfpgan
         self.codeformer = codeformer
         self.esrgan = esrgan
         self.free_gpu_mem = free_gpu_mem
+        self.max_loaded_models = max_loaded_models,
         self.size_matters = True  # used to warn once about large image sizes and VRAM
         self.txt2mask = None
         self.safety_checker = None
@@ -198,7 +203,7 @@ class Generate:
             self.precision = choose_precision(self.device)
 
         # model caching system for fast switching
-        self.model_cache = ModelCache(mconfig,self.device,self.precision)
+        self.model_cache = ModelCache(mconfig,self.device,self.precision,max_loaded_models=max_loaded_models)
         self.model_name  = model or self.model_cache.default_model() or FALLBACK_MODEL_NAME
 
         # for VRAM usage statistics
@@ -217,6 +222,7 @@ class Generate:
                 safety_model_id = "CompVis/stable-diffusion-safety-checker"
                 self.safety_checker = StableDiffusionSafetyChecker.from_pretrained(safety_model_id, local_files_only=True)
                 self.safety_feature_extractor = AutoFeatureExtractor.from_pretrained(safety_model_id, local_files_only=True)
+                self.safety_checker.to(self.device)
             except Exception:
                 print('** An error was encountered while installing the safety checker:')
                 print(traceback.format_exc())
@@ -239,11 +245,11 @@ class Generate:
         return outputs
 
     def txt2img(self, prompt, **kwargs):
-        outdir = kwargs.pop('outdir', 'outputs/img-samples')
+        outdir = kwargs.pop('outdir', self.outdir)
         return self.prompt2png(prompt, outdir, **kwargs)
 
     def img2img(self, prompt, **kwargs):
-        outdir = kwargs.pop('outdir', 'outputs/img-samples')
+        outdir = kwargs.pop('outdir', self.outdir)
         assert (
             'init_img' in kwargs
         ), 'call to img2img() must include the init_img argument'
@@ -272,6 +278,7 @@ class Generate:
             threshold        = 0.0,
             perlin           = 0.0,
             karras_max       = None,
+            outdir         = None,
             # these are specific to img2img and inpaint
             init_img         = None,
             init_mask        = None,
@@ -284,6 +291,7 @@ class Generate:
             embiggen       =    None,
             embiggen_tiles =    None,
             # these are specific to GFPGAN/ESRGAN
+            gfpgan_strength=    0,
             facetool         = None,
             facetool_strength  = 0,
             codeformer_fidelity = None,
@@ -291,6 +299,9 @@ class Generate:
             upscale          = None,
             # this is specific to inpainting and causes more extreme inpainting
             inpaint_replace  = 0.0,
+            # This controls the size at which inpaint occurs (scaled up for inpaint, then back down for the result)
+            inpaint_width    = None,
+            inpaint_height   = None,
             # This will help match inpainted areas to the original image more smoothly
             mask_blur_radius: int = 8,
             # Set this True to handle KeyboardInterrupt internally
@@ -360,6 +371,7 @@ class Generate:
         ddim_eta = ddim_eta or self.ddim_eta
         iterations = iterations or self.iterations
         strength = strength or self.strength
+        outdir                = outdir     or self.outdir
         self.seed = seed
         self.log_tokenization = log_tokenization
         self.step_callback = step_callback
@@ -481,7 +493,9 @@ class Generate:
                 seam_strength = seam_strength,
                 seam_steps = seam_steps,
                 tile_size = tile_size,
-                force_outpaint = force_outpaint
+                force_outpaint = force_outpaint,
+                inpaint_width  = inpaint_width,
+                inpaint_height = inpaint_height
             )
 
             if init_color:
@@ -547,17 +561,15 @@ class Generate:
             ):
         # retrieve the seed from the image;
         seed   = None
-        image_metadata = None
         prompt = None
 
-        args   = metadata_from_png(image_path)
-        seed   = args.seed
-        prompt = args.prompt
-        print(f'>> retrieved seed {seed} and prompt "{prompt}" from {image_path}')
-
-        if not seed:
-            print('* Could not recover seed for image. Replacing with 42. This will not affect image quality')
-            seed = 42
+        args = metadata_from_png(image_path)
+        seed = opt.seed or args.seed
+        if seed is None or seed < 0:
+            seed = random.randrange(0, np.iinfo(np.uint32).max)
+        
+        prompt = opt.prompt or args.prompt or ''
+        print(f'>> using seed {seed} and prompt "{prompt}" for {image_path}')
 
         # try to reuse the same filename prefix as the original file.
         # we take everything up to the first period
@@ -571,7 +583,7 @@ class Generate:
 
         # used by multiple postfixers
         # todo: cross-attention control
-        uc, c, _ = get_uc_and_c_and_ec(
+        uc, c, extra_conditioning_info = get_uc_and_c_and_ec(
             prompt, model =self.model,
             skip_normalize=opt.skip_normalize,
             log_tokens    =opt.log_tokenization
@@ -604,7 +616,11 @@ class Generate:
                     extend_instructions[direction]=int(pixels)
                 except ValueError:
                     print(f'** invalid extension instruction. Use <directions> <pixels>..., as in "top 64 left 128 right 64 bottom 64"')
-            if len(extend_instructions)>0:
+
+            opt.seed = seed
+            opt.prompt = prompt
+            
+            if len(extend_instructions) > 0:
                 restorer = Outcrop(image,self,)
                 return restorer.process (
                     extend_instructions,
@@ -625,7 +641,7 @@ class Generate:
                 steps       = opt.steps,
                 cfg_scale   = opt.cfg_scale,
                 ddim_eta    = self.ddim_eta,
-                conditioning= (uc, c),
+                conditioning= (uc, c, extra_conditioning_info),
                 init_img    = image_path,  # not the Image! (sigh)
                 init_image  = image,       # embiggen wants both! (sigh)
                 strength    = opt.strength,
@@ -786,9 +802,24 @@ class Generate:
         if self.model_name == model_name and self.model is not None:
             return self.model
 
-        model_data = self.model_cache.get_model(model_name)
-        if model_data is None or len(model_data) == 0:
-            return None
+        # the model cache does the loading and offloading
+        cache = self.model_cache
+        if not cache.valid_model(model_name):
+            print(f'** "{model_name}" is not a known model name. Please check your models.yaml file')
+            return self.model
+        
+        cache.print_vram_usage()
+
+        # have to get rid of all references to model in order
+        # to free it from GPU memory
+        self.model = None
+        self.sampler = None
+        self.generators = {}
+        gc.collect()
+        
+        model_data = cache.get_model(model_name)
+        if model_data is None:  # restore previous
+            model_data = cache.get_model(self.model_name)
 
         self.model = model_data['model']
         self.width = model_data['width']
@@ -881,7 +912,7 @@ class Generate:
         assert os.path.exists(image_path), '** "{image_path}" not found. Please enter the name of an existing image file to mask **'
         basename,_ = os.path.splitext(os.path.basename(image_path))
         if self.txt2mask is None:
-            self.txt2mask  = Txt2Mask(device = self.device)
+            self.txt2mask  = Txt2Mask(device = self.device, refined=True)
         segmented  = self.txt2mask.segment(image_path,prompt)
         trans = segmented.to_transparent()
         inverse = segmented.to_transparent(invert=True)
@@ -897,6 +928,9 @@ class Generate:
     # to help WebGUI - front end to generator util function
     def sample_to_image(self, samples):
         return self._make_base().sample_to_image(samples)
+
+    def sample_to_lowres_estimated_image(self, samples):
+        return self._make_base().sample_to_lowres_estimated_image(samples)
 
     # very repetitive code - can this be simplified? The KSampler names are
     # consistent, at least
@@ -1001,7 +1035,9 @@ class Generate:
                 return True
         return False
 
-    def _check_for_erasure(self, image):
+    def _check_for_erasure(self, image:Image.Image)->bool:
+        if image.mode not in ('RGBA','RGB'):
+            return False
         width, height = image.size
         pixdata = image.load()
         colored = 0
@@ -1036,14 +1072,8 @@ class Generate:
         print(
             f'>> image will be resized to fit inside a box {w}x{h} in size.'
         )
-        if image.width > image.height:
-            h = None   # by setting h to none, we tell InitImageResizer to fit into the width and calculate height
-        elif image.height > image.width:
-            w = None   # ditto for w
-        else:
-            pass
         # note that InitImageResizer does the multiple of 64 truncation internally
-        image = InitImageResizer(image).resize(w, h)
+        image = InitImageResizer(image).resize(width=w, height=h)
         print(
             f'>> after adjusting image dimensions to be multiples of 64, init image is {image.width}x{image.height}'
         )

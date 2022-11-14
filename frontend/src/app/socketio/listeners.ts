@@ -33,7 +33,11 @@ import {
   setMaskPath,
 } from '../../features/options/optionsSlice';
 import { requestImages, requestNewImages } from './actions';
-import { clearImageToInpaint, setImageToInpaint } from '../../features/tabs/Inpainting/inpaintingSlice';
+import {
+  clearImageToInpaint,
+  setImageToInpaint,
+} from '../../features/tabs/Inpainting/inpaintingSlice';
+import { tabMap } from '../../features/tabs/InvokeTabs';
 
 /**
  * Returns an object containing listener callbacks for socketio events.
@@ -93,15 +97,34 @@ const makeSocketIOListeners = (
      */
     onGenerationResult: (data: InvokeAI.ImageResultResponse) => {
       try {
+        const { shouldLoopback, activeTab } = getState().options;
+        const newImage = {
+          uuid: uuidv4(),
+          ...data,
+          category: 'result',
+        };
+
         dispatch(
           addImage({
             category: 'result',
-            image: {
-              uuid: uuidv4(),
-              ...data,
-            },
+            image: newImage,
           })
         );
+
+        if (shouldLoopback) {
+          const activeTabName = tabMap[activeTab];
+          switch (activeTabName) {
+            case 'img2img': {
+              dispatch(setInitialImage(newImage));
+              break;
+            }
+            case 'inpainting': {
+              dispatch(setImageToInpaint(newImage));
+              break;
+            }
+          }
+        }
+
         dispatch(
           addLogEntry({
             timestamp: dateFormat(new Date(), 'isoDateTime'),
@@ -123,12 +146,14 @@ const makeSocketIOListeners = (
             ...data,
           })
         );
-        dispatch(
-          addLogEntry({
-            timestamp: dateFormat(new Date(), 'isoDateTime'),
-            message: `Intermediate image generated: ${data.url}`,
-          })
-        );
+        if (!data.isBase64) {
+          dispatch(
+            addLogEntry({
+              timestamp: dateFormat(new Date(), 'isoDateTime'),
+              message: `Intermediate image generated: ${data.url}`,
+            })
+          );
+        }
       } catch (e) {
         console.error(e);
       }
@@ -144,6 +169,7 @@ const makeSocketIOListeners = (
             image: {
               uuid: uuidv4(),
               ...data,
+              category: 'result',
             },
           })
         );
@@ -237,18 +263,20 @@ const makeSocketIOListeners = (
       const { intermediateImage } = getState().gallery;
 
       if (intermediateImage) {
-        dispatch(
-          addImage({
-            category: 'result',
-            image: intermediateImage,
-          })
-        );
-        dispatch(
-          addLogEntry({
-            timestamp: dateFormat(new Date(), 'isoDateTime'),
-            message: `Intermediate image saved: ${intermediateImage.url}`,
-          })
-        );
+        if (!intermediateImage.isBase64) {
+          dispatch(
+            addImage({
+              category: 'result',
+              image: intermediateImage,
+            })
+          );
+          dispatch(
+            addLogEntry({
+              timestamp: dateFormat(new Date(), 'isoDateTime'),
+              message: `Intermediate image saved: ${intermediateImage.url}`,
+            })
+          );
+        }
         dispatch(clearIntermediateImage());
       }
 
@@ -264,7 +292,7 @@ const makeSocketIOListeners = (
      * Callback to run when we receive a 'imageDeleted' event.
      */
     onImageDeleted: (data: InvokeAI.ImageDeletedResponse) => {
-      const { url, uuid, category } = data;
+      const { url } = data;
 
       // remove image from gallery
       dispatch(removeImage(data));
@@ -348,7 +376,7 @@ const makeSocketIOListeners = (
       dispatch(setModelList(model_list));
       dispatch(setCurrentStatus('Model Changed'));
       dispatch(setIsProcessing(false));
-      dispatch(setIsCancelable(false));
+      dispatch(setIsCancelable(true));
       dispatch(
         addLogEntry({
           timestamp: dateFormat(new Date(), 'isoDateTime'),
@@ -361,7 +389,7 @@ const makeSocketIOListeners = (
       const { model_name, model_list } = data;
       dispatch(setModelList(model_list));
       dispatch(setIsProcessing(false));
-      dispatch(setIsCancelable(false));
+      dispatch(setIsCancelable(true));
       dispatch(errorOccurred());
       dispatch(
         addLogEntry({

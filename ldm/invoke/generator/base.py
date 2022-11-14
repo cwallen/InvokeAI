@@ -63,7 +63,7 @@ class Generator():
             **kwargs
         )
         results             = []
-        seed                = seed if seed is not None else self.new_seed()
+        seed                = seed if seed is not None and seed >= 0 else self.new_seed()
         first_seed          = seed
         seed, initial_noise = self.generate_initial_noise(seed, width, height)
 
@@ -115,6 +115,29 @@ class Generator():
             x_samples[0].cpu().numpy(), 'c h w -> h w c'
         )
         return Image.fromarray(x_sample.astype(np.uint8))
+
+        # write an approximate RGB image from latent samples for a single step to PNG
+
+    def sample_to_lowres_estimated_image(self,samples):
+        # origingally adapted from code by @erucipe and @keturn here:
+        # https://discuss.huggingface.co/t/decoding-latents-to-rgb-without-upscaling/23204/7
+
+        # these updated numbers for v1.5 are from @torridgristle
+        v1_5_latent_rgb_factors = torch.tensor([
+            #    R        G        B
+            [ 0.3444,  0.1385,  0.0670], # L1
+            [ 0.1247,  0.4027,  0.1494], # L2
+            [-0.3192,  0.2513,  0.2103], # L3
+            [-0.1307, -0.1874, -0.7445]  # L4
+        ], dtype=samples.dtype, device=samples.device)
+
+        latent_image = samples[0].permute(1, 2, 0) @ v1_5_latent_rgb_factors
+        latents_ubyte = (((latent_image + 1) / 2)
+                         .clamp(0, 1)  # change scale from -1..1 to 0..1
+                         .mul(0xFF)  # to 0..255
+                         .byte()).cpu()
+
+        return Image.fromarray(latents_ubyte.numpy())
 
     def generate_initial_noise(self, seed, width, height):
         initial_noise = None
@@ -197,6 +220,7 @@ class Generator():
         checker = self.safety_checker['checker']
         extractor = self.safety_checker['extractor']
         features = extractor([image], return_tensors="pt")
+        features.to(self.model.device)
 
         # unfortunately checker requires the numpy version, so we have to convert back
         x_image = np.array(image).astype(np.float32) / 255.0

@@ -1,7 +1,9 @@
 import { MdCancel } from 'react-icons/md';
 import { cancelProcessing } from '../../../app/socketio/actions';
 import { RootState, useAppDispatch, useAppSelector } from '../../../app/store';
-import IAIIconButton from '../../../common/components/IAIIconButton';
+import IAIIconButton, {
+  IAIIconButtonProps,
+} from '../../../common/components/IAIIconButton';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { createSelector } from '@reduxjs/toolkit';
 import { SystemState } from '../../system/systemSlice';
@@ -23,7 +25,10 @@ const cancelButtonSelector = createSelector(
   }
 );
 
-export default function CancelButton() {
+export default function CancelButton(
+  props: Omit<IAIIconButtonProps, 'aria-label'>
+) {
+  const { ...rest } = props;
   const dispatch = useAppDispatch();
   const { isProcessing, isConnected, isCancelable } =
     useAppSelector(cancelButtonSelector);
@@ -47,6 +52,7 @@ export default function CancelButton() {
       isDisabled={!isConnected || !isProcessing || !isCancelable}
       onClick={handleClickCancel}
       styleClass="cancel-btn"
+      {...rest}
     />
   );
 }

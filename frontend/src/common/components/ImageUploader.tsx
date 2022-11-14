@@ -1,23 +1,13 @@
 import { useCallback, ReactNode, useState, useEffect } from 'react';
-import { RootState, useAppDispatch, useAppSelector } from '../../app/store';
-import { tabMap } from '../../features/tabs/InvokeTabs';
+import { useAppDispatch, useAppSelector } from '../../app/store';
 import { FileRejection, useDropzone } from 'react-dropzone';
-import { Heading, Spinner, useToast } from '@chakra-ui/react';
-import { createSelector } from '@reduxjs/toolkit';
-import { OptionsState } from '../../features/options/optionsSlice';
+import { useToast } from '@chakra-ui/react';
 import { uploadImage } from '../../app/socketio/actions';
 import { ImageUploadDestination, UploadImagePayload } from '../../app/invokeai';
 import { ImageUploaderTriggerContext } from '../../app/contexts/ImageUploaderTriggerContext';
-
-const appSelector = createSelector(
-  (state: RootState) => state.options,
-  (options: OptionsState) => {
-    const { activeTab } = options;
-    return {
-      activeTabName: tabMap[activeTab],
-    };
-  }
-);
+import { activeTabNameSelector } from '../../features/options/optionsSelectors';
+import { tabDict } from '../../features/tabs/InvokeTabs';
+import ImageUploadOverlay from './ImageUploadOverlay';
 
 type ImageUploaderProps = {
   children: ReactNode;
@@ -26,7 +16,7 @@ type ImageUploaderProps = {
 const ImageUploader = (props: ImageUploaderProps) => {
   const { children } = props;
   const dispatch = useAppDispatch();
-  const { activeTabName } = useAppSelector(appSelector);
+  const activeTabName = useAppSelector(activeTabNameSelector);
   const toast = useToast({});
   const [isHandlingUpload, setIsHandlingUpload] = useState<boolean>(false);
 
@@ -83,6 +73,7 @@ const ImageUploader = (props: ImageUploaderProps) => {
     accept: { 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg', '.png'] },
     noClick: true,
     onDrop,
+    onDragOver: () => setIsHandlingUpload(true),
     maxFiles: 1,
   });
 
@@ -140,30 +131,22 @@ const ImageUploader = (props: ImageUploaderProps) => {
     };
   }, [dispatch, toast, activeTabName]);
 
+  const overlaySecondaryText = ['img2img', 'inpainting'].includes(activeTabName)
+    ? ` to ${tabDict[activeTabName as keyof typeof tabDict].tooltip}`
+    : ``;
+
   return (
     <ImageUploaderTriggerContext.Provider value={open}>
       <div {...getRootProps({ style: {} })}>
         <input {...getInputProps()} />
         {children}
-        {isDragActive && (
-          <div className="dropzone-container">
-            {isDragAccept && (
-              <div className="dropzone-overlay is-drag-accept">
-                <Heading size={'lg'}>Drop Images</Heading>
-              </div>
-            )}
-            {isDragReject && (
-              <div className="dropzone-overlay is-drag-reject">
-                <Heading size={'lg'}>Invalid Upload</Heading>
-                <Heading size={'md'}>Must be single JPEG or PNG image</Heading>
-              </div>
-            )}
-            {isHandlingUpload && (
-              <div className="dropzone-overlay is-handling-upload">
-                <Spinner />
-              </div>
-            )}
-          </div>
+        {isDragActive && isHandlingUpload && (
+          <ImageUploadOverlay
+            isDragAccept={isDragAccept}
+            isDragReject={isDragReject}
+            overlaySecondaryText={overlaySecondaryText}
+            setIsHandlingUpload={setIsHandlingUpload}
+          />
         )}
       </div>
     </ImageUploaderTriggerContext.Provider>

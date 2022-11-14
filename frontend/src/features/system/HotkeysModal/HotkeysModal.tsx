@@ -40,6 +40,16 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
       hotkey: 'Alt+A',
     },
     {
+      title: 'Toggle Options',
+      desc: 'Open and close the options panel',
+      hotkey: 'O',
+    },
+    {
+      title: 'Pin Options',
+      desc: 'Pin the options panel',
+      hotkey: 'Shift+O',
+    },
+    {
       title: 'Toggle Gallery',
       desc: 'Open and close the gallery drawer',
       hotkey: 'G',
@@ -63,14 +73,19 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
 
   const generalHotkeys = [
     {
-      title: 'Set Parameters',
-      desc: 'Use all parameters of the current image',
-      hotkey: 'A',
+      title: 'Set Prompt',
+      desc: 'Use the prompt of the current image',
+      hotkey: 'P',
     },
     {
       title: 'Set Seed',
       desc: 'Use the seed of the current image',
       hotkey: 'S',
+    },
+    {
+      title: 'Set Parameters',
+      desc: 'Use all parameters of the current image',
+      hotkey: 'A',
     },
     { title: 'Restore Faces', desc: 'Restore the current image', hotkey: 'R' },
     { title: 'Upscale', desc: 'Upscale the current image', hotkey: 'U' },
@@ -85,6 +100,7 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
       hotkey: 'Shift+I',
     },
     { title: 'Delete Image', desc: 'Delete the current image', hotkey: 'Del' },
+    { title: 'Close Panels', desc: 'Closes open panels', hotkey: 'Esc' },
   ];
 
   const galleryHotkeys = [
@@ -101,7 +117,7 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
     {
       title: 'Toggle Gallery Pin',
       desc: 'Pins and unpins the gallery to the UI',
-      hotkey: 'Shift+P',
+      hotkey: 'Shift+G',
     },
     {
       title: 'Increase Gallery Image Size',
@@ -134,7 +150,7 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
     {
       title: 'Quick Toggle Brush/Eraser',
       desc: 'Quick toggle between brush and eraser',
-      hotkey: 'Z',
+      hotkey: 'X',
     },
     {
       title: 'Decrease Brush Size',
@@ -184,12 +200,12 @@ export default function HotkeysModal({ children }: HotkeysModalProps) {
     {
       title: 'Lock Bounding Box',
       desc: 'Locks the bounding box',
-      hotkey: 'M',
+      hotkey: 'Shift+Q',
     },
     {
       title: 'Quick Toggle Lock Bounding Box',
       desc: 'Hold to toggle locking the bounding box',
-      hotkey: 'Space',
+      hotkey: 'Q',
     },
     {
       title: 'Expand Inpainting Area',
