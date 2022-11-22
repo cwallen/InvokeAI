@@ -10,9 +10,12 @@
 
 @rem This enables a user to install this project without manually installing git or Python
 
-echo ***** Installing InvokeAI.. *****
+set "no_cache_dir=--no-cache-dir"
+if "%1" == "use-cache" (
+    set "no_cache_dir="
+)
 
-set PATH=c:\windows\system32
+echo ***** Installing InvokeAI.. *****
 
 @rem Config
 set INSTALL_ENV_DIR=%cd%\installer_files\env
@@ -65,7 +68,8 @@ set PATH=%INSTALL_ENV_DIR%\Library\bin;%PATH%
 
 @rem Download/unpack/clean up InvokeAI release sourceball
 set err_msg=----- InvokeAI source download failed -----
-curl -L %RELEASE_URL%/%RELEASE_SOURCEBALL% --output InvokeAI.tgz
+echo Trying to download "%RELEASE_URL%%RELEASE_SOURCEBALL%"
+curl -L %RELEASE_URL%%RELEASE_SOURCEBALL% --output InvokeAI.tgz
 if %errorlevel% neq 0 goto err_exit
 
 set err_msg=----- InvokeAI source unpack failed -----
@@ -103,11 +107,8 @@ echo ***** Unpacked python-build-standalone *****
 @rem create venv
 set err_msg=----- problem creating venv -----
 .\python\python -E -s -m venv .venv
-@rem In reality, the following is ALL that 'activate.bat' does,
-@rem aside from setting the prompt, which we don't care about
-set PYTHONPATH=
-set PATH=.venv\Scripts;%PATH%
 if %errorlevel% neq 0 goto err_exit
+call .venv\Scripts\activate.bat
 
 echo ***** Created Python virtual environment *****
 
@@ -118,7 +119,7 @@ echo We're running under
 if %errorlevel% neq 0 goto err_exit
 
 set err_msg=----- pip update failed -----
-.venv\Scripts\python -m pip install --no-cache-dir --no-warn-script-location --upgrade pip
+.venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location --upgrade pip wheel
 if %errorlevel% neq 0 goto err_exit
 
 echo ***** Updated pip *****
@@ -128,33 +129,29 @@ copy installer\py3.10-windows-x86_64-cuda-reqs.txt requirements.txt
 if %errorlevel% neq 0 goto err_exit
 
 set err_msg=----- main pip install failed -----
-.venv\Scripts\python -m pip install --no-cache-dir --no-warn-script-location -r requirements.txt
-if %errorlevel% neq 0 goto err_exit
-
-set err_msg=----- clipseg install failed -----
-.venv\Scripts\python -m pip install --no-cache-dir --no-warn-script-location git+https://github.com/invoke-ai/clipseg.git@relaxed-python-requirement#egg=clipseg
+.venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location -r requirements.txt
 if %errorlevel% neq 0 goto err_exit
 
 set err_msg=----- InvokeAI setup failed -----
-.venv\Scripts\python -m pip install --no-cache-dir --no-warn-script-location -e .
+.venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location -e .
 if %errorlevel% neq 0 goto err_exit
 
 echo ***** Installed Python dependencies *****
 
+echo ***** Installing invoke.bat ******
+copy installer\invoke.bat .\invoke.bat
+
+@rem more cleanup
+rd /s /q installer installer_files
+
 @rem preload the models
-call .venv\Scripts\python scripts\preload_models.py
+call .venv\Scripts\python scripts\configure_invokeai.py
 set err_msg=----- model download clone failed -----
 if %errorlevel% neq 0 goto err_exit
 
 echo ***** Finished downloading models *****
 
-echo ***** Installing invoke.bat ******
-copy installer\invoke.bat .\invoke.bat
 echo All done! Execute the file invoke.bat in this directory to start InvokeAI
-
-@rem more cleanup
-rd /s /q installer installer_files
-
 pause
 exit
 
