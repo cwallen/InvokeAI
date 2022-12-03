@@ -92,6 +92,7 @@ import shlex
 import copy
 import base64
 import functools
+import warnings
 import ldm.invoke.pngwriter
 from ldm.invoke.globals import Globals
 from ldm.invoke.prompt_parser import split_weighted_subprompts
@@ -100,6 +101,8 @@ SAMPLER_CHOICES = [
     'ddim',
     'k_dpm_2_a',
     'k_dpm_2',
+    'k_dpmpp_2_a',
+    'k_dpmpp_2',
     'k_euler_a',
     'k_euler',
     'k_heun',
@@ -116,7 +119,7 @@ PRECISION_CHOICES = [
 
 # is there a way to pick this up during git commits?
 APP_ID      = 'invoke-ai/InvokeAI'
-APP_VERSION = 'v2.1.2'
+APP_VERSION = 'v2.2.0'
 
 class ArgFormatter(argparse.RawTextHelpFormatter):
         # use defined argument order to display usage
@@ -174,8 +177,9 @@ class Args(object):
                 print(f'>> Initialization file {initfile} found. Loading...')
                 sysargs.insert(0,f'@{initfile}')
             else:
-                print(f'>> Initialization file {initfile} not found. Creating a new one...')
-                self._create_init_file(initfile)
+                from ldm.invoke.CLI import emergency_model_reconfigure
+                emergency_model_reconfigure()
+                sys.exit(-1)
             self._arg_switches = self._arg_parser.parse_args(sysargs)
             return self._arg_switches
         except Exception as e:
@@ -461,9 +465,18 @@ class Args(object):
             default='auto',
         )
         model_group.add_argument(
+            '--nsfw_checker'
             '--safety_checker',
-            action='store_true',
-            help='Check for and blur potentially NSFW images',
+            action=argparse.BooleanOptionalAction,
+            dest='safety_checker',
+            default=False,
+            help='Check for and blur potentially NSFW images. Use --no-nsfw_checker to disable.',
+        )
+        model_group.add_argument(
+            '--patchmatch',
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help='Load the patchmatch extension for outpainting. Use --no-patchmatch to disable.',
         )
         file_group.add_argument(
             '--from_file',
@@ -548,9 +561,23 @@ class Args(object):
             help='generate a grid'
         )
         render_group.add_argument(
+            '--embedding_directory',
             '--embedding_path',
+            dest='embedding_path',
+            default='embeddings',
             type=str,
-            help='Path to a pre-trained embedding manager checkpoint - can only be set on command line',
+            help='Path to a directory containing .bin and/or .pt files, or a single .bin/.pt file. You may use subdirectories. (default is ROOTDIR/embeddings)'
+        )
+        render_group.add_argument(
+            '--embeddings',
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help='Enable embedding directory (default). Use --no-embeddings to disable.',
+        )
+        render_group.add_argument(
+            '--enable_image_debugging',
+            action='store_true',
+            help='Generates debugging image to display'
         )
         # Restoration related args
         postprocessing_group.add_argument(
@@ -611,6 +638,18 @@ class Args(object):
             type=int,
             default='9090',
             help='Web server: Port to listen on'
+        )
+        web_server_group.add_argument(
+            '--certfile',
+            type=str,
+            default=None,
+            help='Web server: Path to certificate file to use for SSL. Use together with --keyfile'
+        )
+        web_server_group.add_argument(
+            '--keyfile',
+            type=str,
+            default=None,
+            help='Web server: Path to private key file to use for SSL. Use together with --certfile'
         )
         web_server_group.add_argument(
             '--gui',

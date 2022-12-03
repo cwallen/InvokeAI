@@ -39,6 +39,8 @@ Dataset_path = './configs/INITIAL_MODELS.yaml'
 Default_config_file = './configs/models.yaml'
 SD_Configs = './configs/stable-diffusion'
 
+assert os.path.exists(Dataset_path),"The configs directory cannot be found. Please run this script from within the InvokeAI distribution directory, or from within the invokeai runtime directory."
+
 Datasets = OmegaConf.load(Dataset_path)
 completer = generic_completer(['yes','no'])
 
@@ -68,10 +70,10 @@ Web version:
 Command-line version:
    python scripts/invoke.py
 
-Remember to activate that 'invokeai' environment before running invoke.py.
-
-Or, if you used one of the automated installers, execute "invoke.sh" (Linux/Mac) 
-or "invoke.bat" (Windows) to start the script.
+If you installed manually, remember to activate the 'invokeai'
+environment before running invoke.py. If you installed using the
+automated installation script, execute "invoke.sh" (Linux/Mac) or
+"invoke.bat" (Windows) to start InvokeAI.
 
 Have fun!
 '''
@@ -241,10 +243,10 @@ def download_weight_datasets(models:dict, access_token:str):
     for mod in models.keys():
         repo_id = Datasets[mod]['repo_id']
         filename = Datasets[mod]['file']
-        print(os.path.join(Globals.root,Model_dir,Weights_dir), file=sys.stderr)
+        dest = os.path.join(Globals.root,Model_dir,Weights_dir)
         success = hf_download_with_resume(
             repo_id=repo_id,
-            model_dir=os.path.join(Globals.root,Model_dir,Weights_dir),
+            model_dir=dest,
             model_name=filename,
             access_token=access_token
         )
@@ -492,12 +494,12 @@ def download_clipseg():
 
 #-------------------------------------
 def download_safety_checker():
-    print('Installing safety model for NSFW content detection...',file=sys.stderr)
+    print('Installing model for NSFW content detection...',file=sys.stderr)
     try:
         from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
         from transformers import AutoFeatureExtractor
     except ModuleNotFoundError:
-        print('Error installing safety checker model:')
+        print('Error installing NSFW checker model:')
         print(traceback.format_exc())
         return
     safety_model_id = "CompVis/stable-diffusion-safety-checker"
@@ -518,6 +520,7 @@ def download_weights(opt:dict):
             return
         else:
             print('** Cannot download models because no Hugging Face access token could be found. Please re-run without --yes')
+            return
     else:
         choice = user_wants_to_download_weights()
 
@@ -561,14 +564,14 @@ def get_root(root:str=None)->str:
     return root
 
 #-------------------------------------
-def select_root(yes_to_all:bool=False):
-    default = os.path.expanduser('~/invokeai')
+def select_root(root:str, yes_to_all:bool=False):
+    default = root or os.path.expanduser('~/invokeai')
     if (yes_to_all):
         return default
     completer.set_default_dir(default)
     completer.complete_extensions(())
     completer.set_line(default)
-    return input(f"Select a directory in which to install InvokeAI's models and configuration files [{default}]: ")
+    return input(f"Select a directory in which to install InvokeAI's models and configuration files [{default}]: ") or default
 
 #-------------------------------------
 def select_outputs(root:str,yes_to_all:bool=False):
@@ -578,42 +581,87 @@ def select_outputs(root:str,yes_to_all:bool=False):
     completer.set_default_dir(os.path.expanduser('~'))
     completer.complete_extensions(())
     completer.set_line(default)
-    return input('Select the default directory for image outputs [{default}]: ')
+    return input(f'Select the default directory for image outputs [{default}]: ') or default
 
 #-------------------------------------
 def initialize_rootdir(root:str,yes_to_all:bool=False):
-    assert os.path.exists('./configs'),'Run this script from within the top level of the InvokeAI source code directory, "InvokeAI"'
+    assert os.path.exists('./configs'),'Run this script from within the InvokeAI source code directory, "InvokeAI" or the runtime directory "invokeai".'
     
     print(f'** INITIALIZING INVOKEAI RUNTIME DIRECTORY **')
-    root = root or select_root(yes_to_all)
-    outputs = select_outputs(root,yes_to_all)
-    Globals.root = root
-        
-    print(f'InvokeAI models and configuration files will be placed into {root} and image outputs will be placed into {outputs}.')
-    print(f'\nYou may change these values at any time by editing the --root and --output_dir options in "{Globals.initfile}",')
+    root_selected = False
+    while not root_selected:
+        root = select_root(root,yes_to_all)
+        outputs = select_outputs(root,yes_to_all)
+        Globals.root = os.path.abspath(root)
+        outputs = outputs if os.path.isabs(outputs) else os.path.abspath(os.path.join(Globals.root,outputs))
+
+        print(f'\nInvokeAI models and configuration files will be placed into "{root}" and image outputs will be placed into "{outputs}".')
+        if not yes_to_all:
+            root_selected = yes_or_no('Accept these locations?')
+        else:
+            root_selected = True
+
+    print(f'\nYou may change the chosen directories at any time by editing the --root and --outdir options in "{Globals.initfile}",')
     print(f'You may also change the runtime directory by setting the environment variable INVOKEAI_ROOT.\n')
-    for name in ('models','configs','scripts','frontend/dist'):
+
+    enable_safety_checker = True
+    default_sampler = 'k_heun'
+    default_steps = '20'  # deliberately a string - see test below
+
+    sampler_choices =['ddim','k_dpm_2_a','k_dpm_2','k_euler_a','k_euler','k_heun','k_lms','plms']
+
+    if not yes_to_all:
+        print('The NSFW (not safe for work) checker blurs out images that potentially contain sexual imagery.')
+        print('It can be selectively enabled at run time with --nsfw_checker, and disabled with --no-nsfw_checker.')
+        print('The following option will set whether the checker is enabled by default. Like other options, you can')
+        print(f'change this setting later by editing the file {Globals.initfile}.')
+        enable_safety_checker = yes_or_no('Enable the NSFW checker by default?',enable_safety_checker)
+
+        print('\nThe next choice selects the sampler to use by default. Samplers have different speed/performance')
+        print('tradeoffs. If you are not sure what to select, accept the default.')
+        sampler = None
+        while sampler not in sampler_choices:
+            sampler = input(f'Default sampler to use? ({", ".join(sampler_choices)}) [{default_sampler}]:') or default_sampler
+
+        print('\nThe number of denoising steps affects both the speed and quality of the images generated.')
+        print('Higher steps often (but not always) increases the quality of the image, but increases image')
+        print('generation time. This can be changed at run time. Accept the default if you are unsure.')
+        steps = ''
+        while not steps.isnumeric():
+            steps = input(f'Default number of steps to use during generation? [{default_steps}]:') or default_steps
+    else:
+        sampler = default_sampler
+        steps = default_steps
+
+    safety_checker = '--nsfw_checker' if enable_safety_checker else '--no-nsfw_checker'
+
+    for name in ('models','configs','embeddings'):
         os.makedirs(os.path.join(root,name), exist_ok=True)
-    for src in ('configs','scripts','frontend/dist'):
+    for src in (['configs']):
         dest = os.path.join(root,src)
         if not os.path.samefile(src,dest):
             shutil.copytree(src,dest,dirs_exist_ok=True)
-    os.makedirs(outputs)
+        os.makedirs(outputs, exist_ok=True)
 
     init_file = os.path.expanduser(Globals.initfile)
-    if not os.path.exists(init_file):
-        print(f'Creating the initialization file at "{init_file}".\n')
-        with open(init_file,'w') as f:
-            f.write(f'''# InvokeAI initialization file
+
+    print(f'Creating the initialization file at "{init_file}".\n')
+    with open(init_file,'w') as f:
+        f.write(f'''# InvokeAI initialization file
 # This is the InvokeAI initialization file, which contains command-line default values.
 # Feel free to edit. If anything goes wrong, you can re-initialize this file by deleting
 # or renaming it and then running configure_invokeai.py again.
 
 # The --root option below points to the folder in which InvokeAI stores its models, configs and outputs.
---root="{root}"
+--root="{Globals.root}"
 
 # the --outdir option controls the default location of image files.
 --outdir="{outputs}"
+
+# generation arguments
+{safety_checker}
+--sampler={sampler}
+--steps={steps}
 
 # You may place other  frequently-used startup commands here, one or more per line.
 # Examples:
@@ -621,9 +669,7 @@ def initialize_rootdir(root:str,yes_to_all:bool=False):
 # --steps=20
 # -Ak_euler_a -C10.0
 #
-'''
-            )
-    
+''')
     
 #-------------------------------------
 class ProgressBar():
@@ -673,15 +719,10 @@ def main():
     try:
         introduction()
 
-        # We check for two files to see if the runtime directory is correctly initialized.
-        # 1. a key stable diffusion config file
-        # 2. the web front end static files
+        # We check for to see if the runtime directory is correctly initialized.
         if Globals.root == '' \
-           or not os.path.exists(os.path.join(Globals.root,'configs/stable-diffusion/v1-inference.yaml')) \
-           or not os.path.exists(os.path.join(Globals.root,'frontend/dist')):
+           or not os.path.exists(os.path.join(Globals.root,'configs/stable-diffusion/v1-inference.yaml')):
             initialize_rootdir(Globals.root,opt.yes_to_all)
-
-        print(f'(Initializing with runtime root {Globals.root})\n')
 
         if opt.interactive:
             print('** DOWNLOADING DIFFUSION WEIGHTS **')
@@ -698,10 +739,9 @@ def main():
     except KeyboardInterrupt:
         print('\nGoodbye! Come back soon.')
     except Exception as e:
-        print(f'\nA problem occurred during download.\nThe error was: "{str(e)}"')
+        print(f'\nA problem occurred during initialization.\nThe error was: "{str(e)}"')
+        print(traceback.format_exc())
     
 #-------------------------------------
 if __name__ == '__main__':
     main()
-
-    

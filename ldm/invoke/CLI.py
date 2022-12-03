@@ -15,6 +15,7 @@ from ldm.invoke.args import Args, metadata_dumps, metadata_from_png, dream_cmd_f
 from ldm.invoke.pngwriter import PngWriter, retrieve_metadata, write_metadata
 from ldm.invoke.image_util import make_grid
 from ldm.invoke.log import write_log
+from ldm.invoke.concepts_lib import Concepts
 from omegaconf import OmegaConf
 from pathlib import Path
 import pyparsing
@@ -43,8 +44,10 @@ def main():
             print('--max_loaded_models must be >= 1; using 1')
             args.max_loaded_models = 1
 
-    # alert - setting a global here
+    # alert - setting globals here
     Globals.root = os.path.expanduser(args.root_dir or os.environ.get('INVOKEAI_ROOT') or os.path.abspath('.'))
+    Globals.try_patchmatch = args.patchmatch
+    
     print(f'>> InvokeAI runtime directory is "{Globals.root}"')
 
     # loading here to avoid long delays on startup
@@ -61,6 +64,12 @@ def main():
     # normalize the config directory relative to root
     if not os.path.isabs(opt.conf):
         opt.conf = os.path.normpath(os.path.join(Globals.root,opt.conf))
+
+    if opt.embeddings:
+        if not os.path.isabs(opt.embedding_path):
+            embedding_path = os.path.normpath(os.path.join(Globals.root,opt.embedding_path))
+    else:
+        embedding_path = None
 
     # load the infile as a list of lines
     if opt.infile:
@@ -81,7 +90,7 @@ def main():
             conf = opt.conf,
             model = opt.model,
             sampler_name = opt.sampler_name,
-            embedding_path = opt.embedding_path,
+            embedding_path = embedding_path,
             full_precision = opt.full_precision,
             precision = opt.precision,
             gfpgan=gfpgan,
@@ -91,10 +100,8 @@ def main():
             safety_checker=opt.safety_checker,
             max_loaded_models=opt.max_loaded_models,
             )
-    except FileNotFoundError:
-        print('** You appear to be missing configs/models.yaml')
-        print('** You can either exit this script and run scripts/preload_models.py, or fix the problem now.')
-        emergency_model_create(opt)
+    except (FileNotFoundError, TypeError, AssertionError):
+        emergency_model_reconfigure()
         sys.exit(-1)
     except (IOError, KeyError) as e:
         print(f'{e}. Aborting.')
@@ -104,7 +111,11 @@ def main():
         print(">> changed to seamless tiling mode")
 
     # preload the model
-    gen.load_model()
+    try:
+        gen.load_model()
+    except AssertionError:
+        emergency_model_reconfigure()
+        sys.exit(-1)
 
     # web server loops forever
     if opt.web or opt.gui:
@@ -136,6 +147,7 @@ def main_loop(gen, opt):
     # changing the history file midstream when the output directory is changed.
     completer   = get_completer(opt, models=list(model_config.keys()))
     set_default_output_dir(opt, completer)
+    add_embedding_terms(gen, completer)
     output_cntr = completer.get_current_history_length()+1
 
     # os.pathconf is not available on Windows
@@ -213,7 +225,7 @@ def main_loop(gen, opt):
         set_default_output_dir(opt,completer)
 
         # try to relativize pathnames
-        for attr in ('init_img','init_mask','init_color','embedding_path'):
+        for attr in ('init_img','init_mask','init_color'):
             if getattr(opt,attr) and not os.path.exists(getattr(opt,attr)):
                 basename = getattr(opt,attr)
                 path     = os.path.join(opt.outdir,basename)
@@ -296,6 +308,7 @@ def main_loop(gen, opt):
                     if use_prefix is not None:
                         prefix = use_prefix
                     postprocessed = upscaled if upscaled else operation=='postprocess'
+                    opt.prompt = gen.concept_lib().replace_triggers_with_concepts(opt.prompt)  # to avoid the problem of non-unique concept triggers
                     filename, formatted_dream_prompt = prepare_image_metadata(
                         opt,
                         prefix,
@@ -414,6 +427,7 @@ def do_command(command:str, gen, opt:Args, completer) -> tuple:
     elif command.startswith('!switch'):
         model_name = command.replace('!switch ','',1)
         gen.set_model(model_name)
+        add_embedding_terms(gen, completer)
         completer.add_history(command)
         operation = None
         
@@ -788,7 +802,13 @@ def invoke_ai_web_server_loop(gen, gfpgan, codeformer, esrgan):
     except KeyboardInterrupt:
         pass
     
-
+def add_embedding_terms(gen,completer):
+    '''
+    Called after setting the model, updates the autocompleter with
+    any terms loaded by the embedding manager.
+    '''
+    completer.add_embedding_terms(gen.model.embedding_manager.list_terms())
+    
 def split_variations(variations_string) -> list:
     # shotgun parsing, woo
     parts = []
@@ -910,32 +930,16 @@ def write_commands(opt, file_path:str, outfilepath:str):
             f.write('\n'.join(commands))
         print(f'>> File {outfilepath} with commands created')
 
-def emergency_model_create(opt:Args):
-    completer   = get_completer(opt)
-    completer.complete_extensions(('.yaml','.yml','.ckpt','.vae.pt'))
-    completer.set_default_dir('.')
-    valid_path = False
-    while not valid_path:
-        weights_file = input('Enter the path to a downloaded models file, or ^C to exit: ')
-        valid_path = os.path.exists(weights_file)
-    dir,basename = os.path.split(weights_file)
+def emergency_model_reconfigure():
+    print()
+    print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    print('   You appear to have a missing or misconfigured model file(s).                   ')
+    print('   The script will now exit and run configure_invokeai.py to help fix the problem.')
+    print('   After reconfiguration is done, please relaunch invoke.py.                      ')
+    print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    print('configure_invokeai is launching....\n')
+    
+    sys.argv = ['configure_invokeai','--interactive']
+    import configure_invokeai
+    configure_invokeai.main()
 
-    valid_name = False
-    while not valid_name:
-        name = input('Enter a short name for this model (no spaces): ')
-        name = 'unnamed model' if len(name)==0 else name
-        valid_name = ' ' not in name
-
-    description = input('Enter a description for this model: ')
-    description = 'no description' if len(description)==0 else description
-
-    with open(opt.conf, 'w', encoding='utf-8') as f:
-        f.write(f'{name}:\n')
-        f.write(f'  description: {description}\n')
-        f.write(f'  weights: {weights_file}\n')
-        f.write(f'  config: ./configs/stable-diffusion/v1-inference.yaml\n')
-        f.write(f'  width: 512\n')
-        f.write(f'  height: 512\n')
-        f.write(f'  default: true\n')
-    print(f'Config file {opt.conf} is created. This script will now exit.')
-    print(f'After restarting you may examine the entry with !models and edit it with !edit.')

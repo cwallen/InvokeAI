@@ -39,6 +39,7 @@ from ldm.invoke.conditioning import get_uc_and_c_and_ec
 from ldm.invoke.model_cache import ModelCache
 from ldm.invoke.seamless import configure_model_padding
 from ldm.invoke.txt2mask import Txt2Mask, SegmentedGrayscale
+from ldm.invoke.concepts_lib import Concepts
     
 def fix_func(orig):
     if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
@@ -119,7 +120,7 @@ gr = Generate(
           safety_checker:bool = activate safety checker [False]
 
           # this value is sticky and maintained between generation calls
-          sampler_name:str  = ['ddim', 'k_dpm_2_a', 'k_dpm_2', 'k_euler_a', 'k_euler', 'k_heun', 'k_lms', 'plms']  // k_lms
+          sampler_name:str  = ['ddim', 'k_dpm_2_a', 'k_dpm_2', 'k_dpmpp_2', 'k_dpmpp_2_a', 'k_euler_a', 'k_euler', 'k_heun', 'k_lms', 'plms']  // k_lms
 
           # these are deprecated - use conf and model instead
           weights     = path to model weights ('models/ldm/stable-diffusion-v1/model.ckpt')
@@ -263,6 +264,8 @@ class Generate:
         ), 'call to img2img() must include the init_img argument'
         return self.prompt2png(prompt, outdir, **kwargs)
 
+    from ldm.invoke.generator.inpaint import infill_methods
+
     def prompt2image(
             self,
             # these are common
@@ -323,7 +326,10 @@ class Generate:
             seam_strength: float = 0.7,
             seam_steps: int  = 10,
             tile_size: int   = 32,
+            infill_method = infill_methods[0], # The infill method to use
             force_outpaint: bool = False,
+            enable_image_debugging = False,
+            
             **args,
     ):   # eat up additional cruft
         """
@@ -430,6 +436,9 @@ class Generate:
             self.sampler_name = sampler_name
             self._set_sampler()
 
+        # apply the concepts library to the prompt
+        prompt = self.concept_lib().replace_concepts_with_triggers(prompt, lambda concepts: self.load_concepts(concepts))
+
         # bit of a hack to change the cached sampler's karras threshold to
         # whatever the user asked for
         if karras_max is not None and isinstance(self.sampler,KSampler):
@@ -462,7 +471,7 @@ class Generate:
             )
 
             # TODO: Hacky selection of operation to perform. Needs to be refactored.
-            generator = self.select_generator(init_image, mask_image, embiggen, hires_fix)
+            generator = self.select_generator(init_image, mask_image, embiggen, hires_fix, force_outpaint)
 
             generator.set_variation(
                 self.seed, variation_amount, with_variations
@@ -504,9 +513,11 @@ class Generate:
                 seam_strength = seam_strength,
                 seam_steps = seam_steps,
                 tile_size = tile_size,
+                infill_method = infill_method,
                 force_outpaint = force_outpaint,
-                inpaint_width  = inpaint_width,
-                inpaint_height = inpaint_height
+                inpaint_height = inpaint_height,
+                inpaint_width = inpaint_width,
+                enable_image_debugging = enable_image_debugging,
             )
 
             if init_color:
@@ -832,6 +843,7 @@ class Generate:
         model_data = cache.get_model(model_name)
         if model_data is None:  # restore previous
             model_data = cache.get_model(self.model_name)
+            model_name = self.model_name # addresses Issue #1547
 
         self.model = model_data['model']
         self.width = model_data['width']
@@ -850,6 +862,12 @@ class Generate:
         self._set_sampler()
         self.model_name = model_name
         return self.model
+
+    def load_concepts(self,concepts:list[str]):
+        self.model.embedding_manager.load_concepts(concepts, self.precision=='float32' or self.precision=='autocast')
+
+    def concept_lib(self)->Concepts:
+        return self.model.embedding_manager.concepts_library
 
     def correct_colors(self,
                        image_list,
@@ -956,6 +974,10 @@ class Generate:
             self.sampler = KSampler(self.model, 'dpm_2_ancestral', device=self.device)
         elif self.sampler_name == 'k_dpm_2':
             self.sampler = KSampler(self.model, 'dpm_2', device=self.device)
+        elif self.sampler_name == 'k_dpmpp_2_a':
+            self.sampler = KSampler(self.model, 'dpmpp_2s_ancestral', device=self.device)
+        elif self.sampler_name == 'k_dpmpp_2':
+            self.sampler = KSampler(self.model, 'dpmpp_2m', device=self.device)
         elif self.sampler_name == 'k_euler_a':
             self.sampler = KSampler(self.model, 'euler_ancestral', device=self.device)
         elif self.sampler_name == 'k_euler':

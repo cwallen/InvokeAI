@@ -78,15 +78,17 @@ class ModelCache(object):
         else: # we're about to load a new model, so potentially offload the least recently used one
             try:
                 requested_model, width, height, hash = self._load_model(model_name)
-                self.models[model_name] = {}
-                self.models[model_name]['model'] = requested_model
-                self.models[model_name]['width'] = width
-                self.models[model_name]['height'] = height
-                self.models[model_name]['hash'] = hash
+                self.models[model_name] = {
+                    'model': requested_model,
+                    'width': width,
+                    'height': height,
+                    'hash': hash,
+                }
 
             except Exception as e:
                 print(f'** model {model_name} could not be loaded: {str(e)}')
                 print(traceback.format_exc())
+                assert self.current_model,'** FATAL: no current model to restore to'
                 print(f'** restoring {self.current_model}')
                 self.get_model(self.current_model)
                 return
@@ -129,6 +131,7 @@ class ModelCache(object):
                        },
           model_name2: { etc }
         '''
+        models = {}
         for name in self.config:
             try:
                 description = self.config[name].description
@@ -142,12 +145,12 @@ class ModelCache(object):
             else:
                 status = 'not loaded'
 
-            return {
-                name: {
-                    'status': status,
-                    'description': description,
-                }}
-    
+            models[name]={
+                'status' : status,
+                'description' : description
+            }
+        return models
+
     def print_models(self) -> None:
         '''
         Print a table of models, their descriptions, and load status
@@ -176,11 +179,11 @@ class ModelCache(object):
         method will return True. Will fail with an assertion error if provided
         attributes are incorrect or the model name is missing.
         '''
+        omega = self.config
         for field in ('description','weights','height','width','config'):
             assert field in model_attributes, f'required field {field} is missing'
         assert (clobber or model_name not in omega), f'attempt to overwrite existing model definition "{model_name}"'
 
-        omega = self.config
         config = omega[model_name] if model_name in omega else {}
         for field in model_attributes:
             config[field] = model_attributes[field]
@@ -204,7 +207,7 @@ class ModelCache(object):
         if not os.path.isabs(weights):
             weights = os.path.normpath(os.path.join(Globals.root,weights))
         # scan model
-        self._scan_model(model_name, weights)
+        self.scan_model(model_name, weights)
 
         print(f'>> Loading {model_name} from {weights}')
 
@@ -286,7 +289,7 @@ class ModelCache(object):
         if self._has_cuda():
             torch.cuda.empty_cache()
     
-    def _scan_model(self, model_name, checkpoint):
+    def scan_model(self, model_name, checkpoint):
         # scan model
         print(f'>> Scanning Model: {model_name}')
         scan_result = scan_file_path(checkpoint)

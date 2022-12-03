@@ -16,13 +16,15 @@ if "%1" == "use-cache" (
 )
 
 echo ***** Installing InvokeAI.. *****
-
+echo "USING development BRANCH. REMEMBER TO CHANGE TO main BEFORE RELEASE"
 @rem Config
 set INSTALL_ENV_DIR=%cd%\installer_files\env
 @rem https://mamba.readthedocs.io/en/latest/installation.html
 set MICROMAMBA_DOWNLOAD_URL=https://github.com/cmdr2/stable-diffusion-ui/releases/download/v1.1/micromamba.exe
 set RELEASE_URL=https://github.com/invoke-ai/InvokeAI
-set RELEASE_SOURCEBALL=/archive/refs/heads/main.tar.gz
+#set RELEASE_SOURCEBALL=/archive/refs/heads/main.tar.gz
+# RELEASE_SOURCEBALL=/archive/refs/heads/test-installer.tar.gz
+RELEASE_SOURCEBALL=/archive/refs/heads/development.tar.gz
 set PYTHON_BUILD_STANDALONE_URL=https://github.com/indygreg/python-build-standalone/releases/download
 set PYTHON_BUILD_STANDALONE=20221002/cpython-3.10.7+20221002-x86_64-pc-windows-msvc-shared-install_only.tar.gz
 
@@ -122,7 +124,7 @@ set err_msg=----- pip update failed -----
 .venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location --upgrade pip wheel
 if %errorlevel% neq 0 goto err_exit
 
-echo ***** Updated pip *****
+echo ***** Updated pip and wheel *****
 
 set err_msg=----- requirements file copy failed -----
 copy installer\py3.10-windows-x86_64-cuda-reqs.txt requirements.txt
@@ -132,14 +134,14 @@ set err_msg=----- main pip install failed -----
 .venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location -r requirements.txt
 if %errorlevel% neq 0 goto err_exit
 
+echo ***** Installed Python dependencies *****
+
 set err_msg=----- InvokeAI setup failed -----
 .venv\Scripts\python -m pip install %no_cache_dir% --no-warn-script-location -e .
 if %errorlevel% neq 0 goto err_exit
 
-echo ***** Installed Python dependencies *****
-
-echo ***** Installing invoke.bat ******
 copy installer\invoke.bat .\invoke.bat
+echo ***** Installed invoke launcher script ******
 
 @rem more cleanup
 rd /s /q installer installer_files
@@ -148,6 +150,7 @@ rd /s /q installer installer_files
 call .venv\Scripts\python scripts\configure_invokeai.py
 set err_msg=----- model download clone failed -----
 if %errorlevel% neq 0 goto err_exit
+deactivate
 
 echo ***** Finished downloading models *****
 

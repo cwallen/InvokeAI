@@ -80,10 +80,13 @@ if [ "$OS_NAME" == "darwin" ] && [ "$OS_ARCH" == "arm64" ]; then
 fi
 
 # config
+echo "USING development BRANCH. REMEMBER TO CHANGE TO main BEFORE RELEASE"
 INSTALL_ENV_DIR="$(pwd)/installer_files/env"
 MICROMAMBA_DOWNLOAD_URL="https://micro.mamba.pm/api/micromamba/${MAMBA_OS_NAME}-${MAMBA_ARCH}/latest"
 RELEASE_URL=https://github.com/invoke-ai/InvokeAI
-RELEASE_SOURCEBALL=/archive/refs/heads/main.tar.gz
+# RELEASE_SOURCEBALL=/archive/refs/heads/main.tar.gz
+# RELEASE_SOURCEBALL=/archive/refs/heads/test-installer.tar.gz
+RELEASE_SOURCEBALL=/archive/refs/heads/development.tar.gz
 PYTHON_BUILD_STANDALONE_URL=https://github.com/indygreg/python-build-standalone/releases/download
 if [ "$OS_NAME" == "darwin" ]; then
     PYTHON_BUILD_STANDALONE=20221002/cpython-3.10.7+20221002-${PY_ARCH}-apple-darwin-install_only.tar.gz
@@ -192,7 +195,7 @@ _err_msg="\n----- pip update failed -----\n"
 .venv/bin/python3 -m pip install "$no_cache_dir" --no-warn-script-location --upgrade pip wheel
 _err_exit $? _err_msg
 
-echo -e "\n***** Updated pip *****\n"
+echo -e "\n***** Updated pip and wheel *****\n"
 
 _err_msg="\n----- requirements file copy failed -----\n"
 cp installer/py3.10-${OS_NAME}-"${OS_ARCH}"-${CD}-reqs.txt requirements.txt
@@ -202,14 +205,16 @@ _err_msg="\n----- main pip install failed -----\n"
 .venv/bin/python3 -m pip install "$no_cache_dir" --no-warn-script-location -r requirements.txt
 _err_exit $? _err_msg
 
+echo -e "\n***** Installed Python dependencies *****\n"
+
 _err_msg="\n----- InvokeAI setup failed -----\n"
 .venv/bin/python3 -m pip install "$no_cache_dir" --no-warn-script-location -e .
 _err_exit $? _err_msg
 
-echo -e "\n***** Installed Python dependencies *****\n"
+echo -e "\n***** Installed InvokeAI *****\n"
 
-echo -e "\n***** Installing invoke.sh ******\n"
 cp installer/invoke.sh .
+echo -e "\n***** Installed invoke launcher script ******\n"
 
 # more cleanup
 rm -rf installer/ installer_files/
@@ -218,6 +223,7 @@ rm -rf installer/ installer_files/
 .venv/bin/python3 scripts/configure_invokeai.py
 _err_msg="\n----- model download clone failed -----\n"
 _err_exit $? _err_msg
+deactivate
 
 echo -e "\n***** Finished downloading models *****\n"
 
