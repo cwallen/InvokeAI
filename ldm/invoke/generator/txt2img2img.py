@@ -70,7 +70,7 @@ class Txt2Img2Img(Generator):
             # resizing
 
             image = self.sample_to_image(samples)
-            image = InitImageResizer(image).resize(width, height)
+            image = image.resize((width,height),resample=Image.Resampling.LANCZOS)
 
             image = np.array(image).astype(np.float32) / 255.0
             image = image[None].transpose(0, 3, 1, 2)
